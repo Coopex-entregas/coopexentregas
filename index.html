@@ -102,112 +102,104 @@
   </div>
 
   <script>
-    const ENDPOINTS = {
-      parceria:  { base: "https://kratossystem.onrender.com",   loginPath: "/login", dashboard: "/" },
-      contratos: { base: "https://financas-dxsu.onrender.com",  loginPath: "/login", dashboard: "/" },
-      base:      { base: "https://escalas-2-1.onrender.com",    loginPath: "/login", dashboard: "/" }
-    };
+  // Painéis e rotas de login/dashboard
+  const TARGETS = {
+    parceria:  { loginURL: "https://kratossystem.onrender.com/login",  after: "https://kratossystem.onrender.com/" },
+    contratos: { loginURL: "https://financas-dxsu.onrender.com/login", after: "https://financas-dxsu.onrender.com/" },
+    base:      { loginURL: "https://escalas-2-1.onrender.com/login",   after: "https://escalas-2-1.onrender.com/" }
+    // OBS: se o "Base" autentica no "/", troque loginURL para "https://escalas-2-1.onrender.com/"
+  };
 
-    const $ = sel => document.querySelector(sel);
-    const loginBox  = $("#loginBox");
-    const chooseBox = $("#chooseBox");
-    const who       = $("#who");
-    const loginMsg  = $("#loginMsg");
-    const autoMsg   = $("#autoMsg");
-    const userInput = $("#user");
-    const passInput = $("#pass");
-    const rememberC = $("#rememberUser");
+  // util
+  const $ = (s) => document.querySelector(s);
 
-    (function prime() {
-      const savedU = localStorage.getItem("coopex_portal_username");
-      if (savedU) {
-        userInput.value = savedU;
-        rememberC.checked = true;
-      }
-    })();
+  const loginBox  = $("#loginBox");
+  const chooseBox = $("#chooseBox");
+  const who       = $("#who");
+  const loginMsg  = $("#loginMsg");
+  const autoMsg   = $("#autoMsg");
+  const userInput = $("#user");
+  const passInput = $("#pass");
+  const rememberC = $("#rememberUser");
 
-    $("#loginBtn").addEventListener("click", () => {
-      const u = (userInput.value || "").trim();
-      const p = passInput.value || "";
-      if (!u || !p) {
-        loginMsg.textContent = "Informe usuário e senha.";
-        return;
-      }
-      sessionStorage.setItem("coopex_u", u);
-      sessionStorage.setItem("coopex_p", p);
-      if (rememberC.checked) localStorage.setItem("coopex_portal_username", u);
-      else localStorage.removeItem("coopex_portal_username");
+  // lembrar usuário localmente (só o nome, não a senha)
+  (function prime(){
+    const savedU = localStorage.getItem("coopex_portal_username");
+    if (savedU) { userInput.value = savedU; rememberC.checked = true; }
+  })();
 
-      who.textContent = u;
-      loginMsg.textContent = "";
-      loginBox.classList.add("hidden");
-      chooseBox.classList.remove("hidden");
-    });
+  $("#loginBtn").addEventListener("click", () => {
+    const u = (userInput.value || "").trim();
+    const p = passInput.value || "";
+    if (!u || !p) { loginMsg.textContent = "Informe usuário e senha."; return; }
+    sessionStorage.setItem("coopex_u", u);
+    sessionStorage.setItem("coopex_p", p);
+    if (rememberC.checked) localStorage.setItem("coopex_portal_username", u);
+    else localStorage.removeItem("coopex_portal_username");
+    who.textContent = u;
+    loginMsg.textContent = "";
+    loginBox.classList.add("hidden");
+    chooseBox.classList.remove("hidden");
+  });
 
-    function logout() {
-      sessionStorage.removeItem("coopex_u");
-      sessionStorage.removeItem("coopex_p");
-      autoMsg.textContent = "";
-      chooseBox.classList.add("hidden");
-      loginBox.classList.remove("hidden");
-      passInput.value = "";
+  function logout() {
+    sessionStorage.removeItem("coopex_u");
+    sessionStorage.removeItem("coopex_p");
+    autoMsg.textContent = "";
+    chooseBox.classList.add("hidden");
+    loginBox.classList.remove("hidden");
+    passInput.value = "";
+  }
+
+  // ==== AUTOLOGIN por POST de FORM invisível (cross-domain sem CORS) ====
+  function autoLogin(which) {
+    autoMsg.textContent = "";
+    const cfg = TARGETS[which];
+    if (!cfg) { autoMsg.textContent = "Destino inválido."; return; }
+
+    const u = (sessionStorage.getItem("coopex_u") || "").trim();
+    const p = sessionStorage.getItem("coopex_p") || "";
+    if (!u || !p) { autoMsg.textContent = "Faça login no portal primeiro."; return; }
+
+    // Cria <form> invisível
+    const form = document.createElement("form");
+    form.method = "POST";
+    form.action = cfg.loginURL;
+    form.style.display = "none";
+
+    // Preenche VÁRIOS aliases de usuário e senha — o backend aceita os certos e ignora os outros
+    const aliases = [
+      ["username", u], ["usuario", u], ["login", u], ["email", u],
+      ["password", p], ["senha", p]
+    ];
+    for (const [name, val] of aliases) {
+      const inp = document.createElement("input");
+      inp.type = "hidden";
+      inp.name = name;
+      inp.value = val;
+      form.appendChild(inp);
     }
 
-    async function autoLogin(which) {
-      autoMsg.textContent = "";
-      const creds = {
-        username: sessionStorage.getItem("coopex_u"),
-        password: sessionStorage.getItem("coopex_p")
-      };
-      if (!creds.username || !creds.password) {
-        autoMsg.textContent = "Faça login no portal primeiro.";
-        return;
-      }
-      const cfg = ENDPOINTS[which];
-      if (!cfg) { autoMsg.textContent = "Destino inválido."; return; }
+    // Se algum painel aceitar "remember" / "remember_me", ative aqui:
+    const remember = document.createElement("input");
+    remember.type = "hidden";
+    remember.name = "remember";
+    remember.value = "on";
+    form.appendChild(remember);
 
-      const loginURL = cfg.base + cfg.loginPath;
+    // Se o painel aceitar "next" para redirecionar depois do login:
+    // const next = document.createElement("input");
+    // next.type = "hidden";
+    // next.name = "next";
+    // next.value = cfg.after;
+    // form.appendChild(next);
 
-      try {
-        let csrf = null, csrfName = "csrf_token";
-        try {
-          const res = await fetch(loginURL, {
-            credentials: "include"
-          });
-          if (res.ok) {
-            const html = await res.text();
-            let m = html.match(/name=["']csrf_token["'][^>]*value=["']([^"']+)["']/i);
-            if (m) csrf = m[1];
-            if (!csrf) {
-              m = html.match(/<meta[^>]+name=["']csrf-?token["'][^>]+content=["']([^"']+)["']/i);
-              if (m) { csrf = m[1]; csrfName = "csrf-token"; }
-            }
-          }
-        } catch(e) { }
+    document.body.appendChild(form);
+    form.submit(); // navega para o domínio do painel com POST (se aceitar, já entra logado)
+  }
 
-        const form = new URLSearchParams();
-        form.set("username", creds.username);
-        form.set("password", creds.password);
-        if (csrf) form.set(csrfName, csrf);
-
-        const resp = await fetch(loginURL, {
-          method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: form.toString(),
-          credentials: "include"
-        });
-
-        if (resp.status === 200 || resp.status === 204 || resp.status === 302) {
-          window.location.href = cfg.base + cfg.dashboard;
-          return;
-        }
-      } catch (e) { }
-
-      window.location.href = cfg.base + cfg.dashboard;
-    }
-
-    window.autoLogin = autoLogin;
-    window.logout = logout;
-  </script>
+  window.autoLogin = autoLogin;
+  window.logout = logout;
+</script>
 </body>
 </html>
